@@ -1,0 +1,16 @@
+{
+  "name": "doughcon-collector-worker",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Cloudflare Worker that collects DOUGHCON every 30 minutes and commits to the GitHub repo (replacing unreliable GitHub Actions cron).",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev --test-scheduled",
+    "tail": "wrangler tail"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20240620.0",
+    "typescript": "^5.5.0",
+    "wrangler": "^3.60.0"
+  }
+}
