@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.idea/
+.vscode/
+
+# Build / cache
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# 분석 결과는 수동 생성물이므로 커밋하지 않음 (필요 시 주석 처리)
+data/merged_final.csv
+
+# data/_raw_json/ 는 스키마 변경 사후 복원용 백업이라 의도적으로 커밋한다.
+# (이 .gitignore 에 무시 규칙을 추가하지 마세요.)

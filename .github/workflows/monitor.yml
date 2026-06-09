@@ -1,0 +1,66 @@
+name: monitor-doughcon
+
+# data/doughcon_raw.csv 의 마지막 timestamp 가 너무 오래됐으면 워크플로우를
+# 실패시킨다. 실패 워크플로우는 GitHub 가 기본 이메일로 알림 → 외부 서비스 없이
+# 수집 중단을 인지할 수 있다.
+#
+# 임계치: 2시간. cron 정시 지연(15분 내외)을 감안해도 충분히 보수적.
+
+on:
+  schedule:
+    - cron: "15 * * * *"  # 매시 15분 (collect 와 겹치지 않게 분 단위 어긋남)
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Check last collected timestamp age
+        env:
+          MAX_AGE_MINUTES: "120"  # 2 hours
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          import csv, datetime as dt, os, sys
+          from pathlib import Path
+
+          csv_path = Path("data/doughcon_raw.csv")
+          if not csv_path.exists() or csv_path.stat().st_size <= 50:
+              # 헤더만 있거나 비어있음. 수집이 한 번도 성공한 적 없음.
+              print("::warning::raw csv is empty or missing")
+              sys.exit(0)
+
+          last_ts = None
+          with csv_path.open(encoding="utf-8") as f:
+              reader = csv.DictReader(f)
+              for row in reader:
+                  last_ts = row.get("timestamp")
+          if not last_ts:
+              print("::warning::no rows in raw csv")
+              sys.exit(0)
+
+          last = dt.datetime.fromisoformat(last_ts.replace("Z", "+00:00"))
+          now = dt.datetime.now(dt.timezone.utc)
+          age_min = (now - last).total_seconds() / 60.0
+          limit = float(os.environ["MAX_AGE_MINUTES"])
+
+          print(f"last_ts = {last_ts}")
+          print(f"now     = {now.isoformat()}")
+          print(f"age     = {age_min:.1f} min  (limit {limit:.0f})")
+
+          if age_min > limit:
+              # Actions UI / 이메일에 명확히 노출되도록 GitHub annotation 사용.
+              print(
+                  f"::error::DOUGHCON collector stalled — last row is "
+                  f"{age_min:.1f} min old (limit {limit:.0f})."
+              )
+              sys.exit(1)
+          PY

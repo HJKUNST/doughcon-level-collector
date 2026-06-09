@@ -1,0 +1,72 @@
+name: keepalive
+
+# GitHub 정책: scheduled workflow 는 레포에 "활동" 이 60일간 없으면 자동 비활성화된다.
+# github-actions[bot] 의 커밋은 활동으로 카운트되지 않는다 → 30분 cron 이 매일 푸시해도
+# 어느 날 갑자기 cron 이 멈출 수 있다.
+#
+# 회피: 사용자 권한 PAT 로 주 1회 빈 commit 을 push (사용자 커밋은 활동으로 인정됨).
+#
+# 셋업:
+#   1) GitHub Personal Access Token (fine-grained) 발급 — 권한: Contents read+write
+#   2) Repo Settings → Secrets and variables → Actions → New repository secret
+#      Name : KEEPALIVE_PAT
+#      Value: 발급받은 토큰
+#   3) Secret 이 없으면 이 워크플로우는 안전하게 NO-OP 으로 종료한다 (실패하지 않음).
+
+on:
+  schedule:
+    - cron: "37 7 * * 1"   # 매주 월요일 07:37 UTC (= KST 16:37)
+  workflow_dispatch: {}
+
+permissions:
+  contents: read  # 실제 push 는 PAT 로 수행. GITHUB_TOKEN 은 사용하지 않음.
+
+jobs:
+  touch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Guard — require KEEPALIVE_PAT
+        id: guard
+        env:
+          PAT: ${{ secrets.KEEPALIVE_PAT }}
+        run: |
+          if [ -z "${PAT:-}" ]; then
+            echo "::warning::KEEPALIVE_PAT secret not set — skipping (workflow stays manual)."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout (PAT)
+        if: steps.guard.outputs.skip == 'false'
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.KEEPALIVE_PAT }}
+          fetch-depth: 1
+
+      - name: Touch heartbeat file & push
+        if: steps.guard.outputs.skip == 'false'
+        run: |
+          set -euo pipefail
+          # 사람이 만든 PAT 의 user 정보를 GitHub API 로 조회.
+          # 사용자 계정의 commit 이어야만 "repository activity" 로 인정된다.
+          USER_JSON=$(curl -fsSL -H "Authorization: Bearer ${{ secrets.KEEPALIVE_PAT }}" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/user)
+          USER_LOGIN=$(echo "$USER_JSON" | python3 -c "import json,sys; print(json.load(sys.stdin)['login'])")
+          USER_ID=$(echo "$USER_JSON" | python3 -c "import json,sys; print(json.load(sys.stdin)['id'])")
+
+          git config user.name  "${USER_LOGIN}"
+          git config user.email "${USER_ID}+${USER_LOGIN}@users.noreply.github.com"
+
+          mkdir -p .github
+          date -u +"%Y-%m-%dT%H:%MZ" > .github/.keepalive
+          git add .github/.keepalive
+
+          if git diff --cached --quiet; then
+            echo "no changes (already up to date)"
+            exit 0
+          fi
+          git commit -m "chore: keepalive ($(date -u +%Y-%m-%d))"
+          git push origin "HEAD:${GITHUB_REF_NAME:-main}"

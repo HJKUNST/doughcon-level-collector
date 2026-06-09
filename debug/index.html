@@ -1,0 +1,506 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>DOUGHCON Collector — Debug Dashboard</title>
+  <!--
+    DOUGHCON Collector 디버깅용 정적 대시보드.
+
+    동작 방식
+    - 기본은 같은 레포의 ../data/doughcon_raw.csv 를 fetch 한다.
+    - GitHub Pages 등에서 호스팅하지 않더라도 ?csv=<url> 로 임의 CSV 도 로드 가능.
+    - file:// 로 직접 열면 브라우저가 CSV fetch 를 차단할 수 있으므로
+      `python3 -m http.server -d . 8000` 같은 정적 서버를 권장 (자세한 안내는 화면 상단에 표시).
+
+    포함된 패널
+    1) 현재(마지막) DOUGHCON 레벨/지수와 마지막 수집 시각으로부터의 경과 시간
+    2) 수집 건수, 일별 평균 수집 횟수, 누락률 추정
+    3) 레벨 분포 히스토그램
+    4) doughcon_level / overall_index / smoothed_index 시계열 차트
+    5) 레벨 1~2 이벤트 테이블 (이벤트 스터디 후보)
+    6) 최근 50건 raw 테이블
+  -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #0e1116;
+      --panel: #161b22;
+      --panel-2: #1f2630;
+      --border: #2c333d;
+      --text: #e6edf3;
+      --text-dim: #8b949e;
+      --accent: #58a6ff;
+      --ok: #3fb950;
+      --warn: #d29922;
+      --bad: #f85149;
+      --l1: #f85149;
+      --l2: #f0883e;
+      --l3: #d29922;
+      --l4: #56d364;
+      --l5: #3fb950;
+    }
+    @media (prefers-color-scheme: light) {
+      :root {
+        --bg: #f6f8fa;
+        --panel: #ffffff;
+        --panel-2: #f0f3f6;
+        --border: #d0d7de;
+        --text: #1f2328;
+        --text-dim: #57606a;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; padding: 24px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Apple SD Gothic Neo", sans-serif;
+      background: var(--bg); color: var(--text);
+      line-height: 1.45;
+    }
+    header { display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; margin-bottom: 20px; }
+    header h1 { margin: 0; font-size: 20px; }
+    header .sub { color: var(--text-dim); font-size: 13px; }
+    .toolbar { margin-left: auto; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .toolbar input[type=text] {
+      background: var(--panel); color: var(--text);
+      border: 1px solid var(--border); border-radius: 6px;
+      padding: 6px 10px; font: inherit; width: 360px; max-width: 60vw;
+    }
+    .toolbar button {
+      background: var(--panel-2); color: var(--text);
+      border: 1px solid var(--border); border-radius: 6px;
+      padding: 6px 12px; cursor: pointer; font: inherit;
+    }
+    .toolbar button:hover { background: var(--border); }
+
+    .notice {
+      background: var(--panel); border: 1px solid var(--border); border-left: 3px solid var(--warn);
+      padding: 10px 14px; border-radius: 6px; margin-bottom: 16px; color: var(--text-dim); font-size: 13px;
+    }
+    .notice code { background: var(--panel-2); padding: 1px 6px; border-radius: 4px; }
+
+    .grid {
+      display: grid; gap: 16px;
+      grid-template-columns: repeat(12, 1fr);
+    }
+    .card {
+      background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 16px;
+    }
+    .card h2 { margin: 0 0 12px; font-size: 13px; color: var(--text-dim); font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
+    .span-3 { grid-column: span 3; } .span-4 { grid-column: span 4; }
+    .span-6 { grid-column: span 6; } .span-8 { grid-column: span 8; }
+    .span-12 { grid-column: span 12; }
+    @media (max-width: 1100px) {
+      .span-3, .span-4, .span-6, .span-8 { grid-column: span 12; }
+    }
+
+    .big {
+      font-size: 40px; font-weight: 700; line-height: 1; display: flex; align-items: center; gap: 12px;
+    }
+    .big .dot {
+      width: 16px; height: 16px; border-radius: 50%; display: inline-block;
+    }
+    .kv { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin-top: 12px; font-size: 13px; color: var(--text-dim); }
+    .kv b { color: var(--text); font-weight: 500; }
+
+    .hist { display: flex; gap: 8px; align-items: flex-end; height: 140px; padding-top: 12px; }
+    .hist .bar { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 6px; font-size: 12px; color: var(--text-dim); }
+    .hist .bar .fill { width: 100%; border-radius: 4px 4px 0 0; min-height: 4px; }
+    .hist .bar b { color: var(--text); font-weight: 500; }
+
+    .level-1 { background: var(--l1); } .level-2 { background: var(--l2); }
+    .level-3 { background: var(--l3); } .level-4 { background: var(--l4); }
+    .level-5 { background: var(--l5); }
+
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+    th { color: var(--text-dim); font-weight: 600; }
+    tbody tr:hover { background: var(--panel-2); }
+    .scroll { max-height: 360px; overflow: auto; }
+    .pill {
+      display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; color: #0e1116; font-weight: 600;
+    }
+    .muted { color: var(--text-dim); }
+    .err { color: var(--bad); }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>DOUGHCON Collector <span class="muted">— debug</span></h1>
+    <span class="sub" id="loaded-from">loading…</span>
+    <div class="toolbar">
+      <input id="csv-url" type="text" placeholder="../data/doughcon_raw.csv" />
+      <button id="reload-btn">Reload</button>
+    </div>
+  </header>
+
+  <div id="notice" class="notice" style="display:none"></div>
+
+  <main class="grid">
+    <section class="card span-4">
+      <h2>Latest</h2>
+      <div class="big">
+        <span class="dot" id="latest-dot"></span>
+        <span id="latest-level">—</span>
+        <span class="muted" style="font-size:18px" id="latest-label"></span>
+      </div>
+      <div class="kv">
+        <span class="muted">overall_index</span>  <b id="latest-overall">—</b>
+        <span class="muted">smoothed_index</span> <b id="latest-smoothed">—</b>
+        <span class="muted">timestamp (UTC)</span> <b id="latest-ts">—</b>
+        <span class="muted">age</span>            <b id="latest-age">—</b>
+      </div>
+    </section>
+
+    <section class="card span-4">
+      <h2>Collection health</h2>
+      <div class="kv" style="margin-top: 4px">
+        <span class="muted">total rows</span>          <b id="stat-total">—</b>
+        <span class="muted">distinct days</span>       <b id="stat-days">—</b>
+        <span class="muted">avg rows / day</span>      <b id="stat-avg">—</b>
+        <span class="muted">expected / day</span>      <b>48</b>
+        <span class="muted">est. missing rate</span>   <b id="stat-missing">—</b>
+        <span class="muted">first ts (UTC)</span>      <b id="stat-first">—</b>
+        <span class="muted">last ts (UTC)</span>       <b id="stat-last">—</b>
+      </div>
+    </section>
+
+    <section class="card span-4">
+      <h2>Level distribution</h2>
+      <div class="hist" id="hist"></div>
+      <div class="muted" style="margin-top: 8px; font-size: 12px">
+        1 = highest readiness · 5 = quiet
+      </div>
+    </section>
+
+    <section class="card span-12">
+      <h2>Time series</h2>
+      <div style="height: 320px; position: relative">
+        <canvas id="chart-ts"></canvas>
+      </div>
+    </section>
+
+    <section class="card span-6">
+      <h2>Level 1–2 events (event-study candidates)</h2>
+      <div class="scroll">
+        <table>
+          <thead><tr><th>timestamp (UTC)</th><th>level</th><th>overall</th><th>smoothed</th></tr></thead>
+          <tbody id="events-body"><tr><td colspan="4" class="muted">no data</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="card span-6">
+      <h2>Recent 50 rows</h2>
+      <div class="scroll">
+        <table>
+          <thead><tr><th>timestamp (UTC)</th><th>level</th><th>overall</th><th>smoothed</th></tr></thead>
+          <tbody id="recent-body"><tr><td colspan="4" class="muted">no data</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const LEVEL_COLORS = {
+      1: getCss('--l1'), 2: getCss('--l2'), 3: getCss('--l3'),
+      4: getCss('--l4'), 5: getCss('--l5'),
+    };
+    const LEVEL_LABELS = {
+      1: 'HIGHEST READINESS',
+      2: 'INCREASED READINESS',
+      3: 'ELEVATED',
+      4: 'NORMAL',
+      5: 'QUIET',
+    };
+
+    const DEFAULT_CSV = '../data/doughcon_raw.csv';
+
+    let tsChart = null;
+
+    init();
+
+    function init() {
+      const params = new URLSearchParams(location.search);
+      const startUrl = params.get('csv') || DEFAULT_CSV;
+      document.getElementById('csv-url').value = startUrl;
+      document.getElementById('reload-btn').addEventListener('click', () => {
+        const u = document.getElementById('csv-url').value.trim() || DEFAULT_CSV;
+        loadAndRender(u);
+      });
+      loadAndRender(startUrl);
+    }
+
+    async function loadAndRender(url) {
+      setNotice('');
+      setLoadedFrom(`fetching ${url} …`);
+      try {
+        const resp = await fetch(url, { cache: 'no-store' });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const text = await resp.text();
+        const rows = parseCsv(text);
+        if (!rows.length) {
+          setLoadedFrom(`${url} — empty (collector 가 아직 1회도 실행되지 않았을 수 있음)`);
+          render([]);
+          return;
+        }
+        setLoadedFrom(`${url} — ${rows.length} rows`);
+        render(rows);
+      } catch (e) {
+        const hint = location.protocol === 'file:'
+          ? 'file:// 로 열면 브라우저가 CSV 를 차단합니다. <code>python3 -m http.server -d . 8000</code> 후 <code>http://localhost:8000/debug/</code> 로 여세요.'
+          : '경로/네트워크를 확인하세요.';
+        setNotice(`<span class="err">CSV 로드 실패:</span> ${escapeHtml(String(e.message || e))}. ${hint}`);
+        setLoadedFrom(`failed: ${url}`);
+      }
+    }
+
+    function parseCsv(text) {
+      const lines = text.split(/\r?\n/).filter(l => l.length > 0);
+      if (lines.length === 0) return [];
+      const header = lines[0].split(',').map(s => s.trim());
+      const idx = {
+        timestamp: header.indexOf('timestamp'),
+        level: header.indexOf('doughcon_level'),
+        overall: header.indexOf('overall_index'),
+        smoothed: header.indexOf('smoothed_index'),
+      };
+      if (idx.timestamp < 0 || idx.level < 0) return [];
+      const rows = [];
+      for (let i = 1; i < lines.length; i++) {
+        const cols = lines[i].split(',');
+        const ts = cols[idx.timestamp];
+        const lv = parseInt(cols[idx.level], 10);
+        if (!ts || !Number.isFinite(lv)) continue;
+        rows.push({
+          timestamp: ts,
+          date: new Date(ts),
+          level: lv,
+          overall: numOrNull(cols[idx.overall]),
+          smoothed: numOrNull(cols[idx.smoothed]),
+        });
+      }
+      rows.sort((a, b) => a.date - b.date);
+      return rows;
+    }
+
+    function render(rows) {
+      renderLatest(rows);
+      renderHealth(rows);
+      renderHistogram(rows);
+      renderTimeSeries(rows);
+      renderEvents(rows);
+      renderRecent(rows);
+    }
+
+    function renderLatest(rows) {
+      const last = rows[rows.length - 1];
+      const dot = document.getElementById('latest-dot');
+      if (!last) {
+        document.getElementById('latest-level').textContent = '—';
+        document.getElementById('latest-label').textContent = '';
+        document.getElementById('latest-overall').textContent = '—';
+        document.getElementById('latest-smoothed').textContent = '—';
+        document.getElementById('latest-ts').textContent = '—';
+        document.getElementById('latest-age').textContent = '—';
+        dot.style.background = 'var(--text-dim)';
+        return;
+      }
+      document.getElementById('latest-level').textContent = `DC${last.level}`;
+      document.getElementById('latest-label').textContent = LEVEL_LABELS[last.level] || '';
+      document.getElementById('latest-overall').textContent = fmtNum(last.overall);
+      document.getElementById('latest-smoothed').textContent = fmtNum(last.smoothed);
+      document.getElementById('latest-ts').textContent = last.timestamp;
+      document.getElementById('latest-age').textContent = humanAge(Date.now() - last.date.getTime());
+      dot.style.background = LEVEL_COLORS[last.level] || 'var(--text-dim)';
+    }
+
+    function renderHealth(rows) {
+      const total = rows.length;
+      document.getElementById('stat-total').textContent = total.toLocaleString();
+      if (!total) {
+        ['stat-days','stat-avg','stat-missing','stat-first','stat-last']
+          .forEach(id => document.getElementById(id).textContent = '—');
+        return;
+      }
+      const byDay = new Map();
+      for (const r of rows) {
+        const key = r.date.toISOString().slice(0, 10);
+        byDay.set(key, (byDay.get(key) || 0) + 1);
+      }
+      const days = byDay.size;
+      const avg = total / days;
+      // 누락률: 첫 row 가 들어온 이후 경과한 30분 슬롯 대비 실제 수집 비율.
+      // 단 마지막 row 가 아주 오래된 경우 과대 추정될 수 있으므로 "지금까지"가 아니라
+      // first ~ last 구간으로만 계산한다.
+      const first = rows[0].date, last = rows[rows.length - 1].date;
+      const slots = Math.max(1, Math.round((last - first) / (30 * 60 * 1000)) + 1);
+      const missing = Math.max(0, 1 - total / slots);
+
+      document.getElementById('stat-days').textContent = days;
+      document.getElementById('stat-avg').textContent = avg.toFixed(1);
+      document.getElementById('stat-missing').textContent = (missing * 100).toFixed(1) + '%';
+      document.getElementById('stat-first').textContent = first.toISOString().replace('.000','');
+      document.getElementById('stat-last').textContent  = last.toISOString().replace('.000','');
+    }
+
+    function renderHistogram(rows) {
+      const host = document.getElementById('hist');
+      host.innerHTML = '';
+      const counts = [0, 0, 0, 0, 0];
+      for (const r of rows) {
+        if (r.level >= 1 && r.level <= 5) counts[r.level - 1]++;
+      }
+      const max = Math.max(1, ...counts);
+      for (let lv = 1; lv <= 5; lv++) {
+        const c = counts[lv - 1];
+        const bar = document.createElement('div');
+        bar.className = 'bar';
+        const fill = document.createElement('div');
+        fill.className = 'fill level-' + lv;
+        fill.style.height = (c / max * 120) + 'px';
+        bar.appendChild(fill);
+        const v = document.createElement('b');
+        v.textContent = c.toLocaleString();
+        bar.appendChild(v);
+        const lbl = document.createElement('span');
+        lbl.textContent = 'DC' + lv;
+        bar.appendChild(lbl);
+        host.appendChild(bar);
+      }
+    }
+
+    function renderTimeSeries(rows) {
+      const ctx = document.getElementById('chart-ts').getContext('2d');
+      const levelData    = rows.map(r => ({ x: r.date, y: r.level }));
+      const overallData  = rows.map(r => ({ x: r.date, y: r.overall }));
+      const smoothedData = rows.map(r => ({ x: r.date, y: r.smoothed }));
+
+      if (tsChart) tsChart.destroy();
+      tsChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          datasets: [
+            {
+              label: 'doughcon_level (right)',
+              data: levelData,
+              borderColor: '#8b949e', backgroundColor: '#8b949e',
+              stepped: true, yAxisID: 'y1', pointRadius: 0, borderWidth: 2,
+            },
+            {
+              label: 'overall_index',
+              data: overallData,
+              borderColor: '#58a6ff', backgroundColor: 'rgba(88,166,255,0.15)',
+              yAxisID: 'y', pointRadius: 0, borderWidth: 1.5,
+            },
+            {
+              label: 'smoothed_index',
+              data: smoothedData,
+              borderColor: '#f0883e', backgroundColor: 'rgba(240,136,62,0.15)',
+              yAxisID: 'y', pointRadius: 0, borderWidth: 1.5,
+            },
+          ],
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          interaction: { mode: 'nearest', axis: 'x', intersect: false },
+          plugins: {
+            legend: { labels: { color: getCss('--text') } },
+            tooltip: { mode: 'index', intersect: false },
+          },
+          scales: {
+            x: {
+              type: 'time',
+              time: { tooltipFormat: 'yyyy-MM-dd HH:mm' },
+              ticks: { color: getCss('--text-dim') },
+              grid:  { color: getCss('--border') },
+            },
+            y: {
+              position: 'left',
+              ticks: { color: getCss('--text-dim') },
+              grid:  { color: getCss('--border') },
+              title: { display: true, text: 'index', color: getCss('--text-dim') },
+            },
+            y1: {
+              position: 'right', min: 1, max: 5, reverse: true,
+              ticks: { stepSize: 1, color: getCss('--text-dim') },
+              grid:  { drawOnChartArea: false },
+              title: { display: true, text: 'DOUGHCON level (1=high)', color: getCss('--text-dim') },
+            },
+          },
+        },
+      });
+    }
+
+    function renderEvents(rows) {
+      const events = rows.filter(r => r.level <= 2).slice(-100).reverse();
+      const body = document.getElementById('events-body');
+      if (!events.length) {
+        body.innerHTML = '<tr><td colspan="4" class="muted">no level 1–2 events yet</td></tr>';
+        return;
+      }
+      body.innerHTML = events.map(r => `
+        <tr>
+          <td>${escapeHtml(r.timestamp)}</td>
+          <td><span class="pill" style="background:${LEVEL_COLORS[r.level]}">DC${r.level}</span></td>
+          <td>${fmtNum(r.overall)}</td>
+          <td>${fmtNum(r.smoothed)}</td>
+        </tr>
+      `).join('');
+    }
+
+    function renderRecent(rows) {
+      const recent = rows.slice(-50).reverse();
+      const body = document.getElementById('recent-body');
+      if (!recent.length) {
+        body.innerHTML = '<tr><td colspan="4" class="muted">no rows</td></tr>';
+        return;
+      }
+      body.innerHTML = recent.map(r => `
+        <tr>
+          <td>${escapeHtml(r.timestamp)}</td>
+          <td><span class="pill" style="background:${LEVEL_COLORS[r.level]}">DC${r.level}</span></td>
+          <td>${fmtNum(r.overall)}</td>
+          <td>${fmtNum(r.smoothed)}</td>
+        </tr>
+      `).join('');
+    }
+
+    function setLoadedFrom(s) { document.getElementById('loaded-from').textContent = s; }
+    function setNotice(html) {
+      const el = document.getElementById('notice');
+      if (!html) { el.style.display = 'none'; el.innerHTML = ''; return; }
+      el.style.display = ''; el.innerHTML = html;
+    }
+    function getCss(name) {
+      return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    }
+    function numOrNull(s) {
+      if (s === undefined || s === null || s === '') return null;
+      const n = Number(s);
+      return Number.isFinite(n) ? n : null;
+    }
+    function fmtNum(n) {
+      if (n === null || n === undefined) return '—';
+      return Math.abs(n) >= 100 ? n.toFixed(1) : n.toFixed(2);
+    }
+    function humanAge(ms) {
+      if (ms < 0) return 'in future';
+      const s = Math.floor(ms / 1000);
+      if (s < 60) return s + 's ago';
+      const m = Math.floor(s / 60);
+      if (m < 60) return m + 'm ago';
+      const h = Math.floor(m / 60);
+      if (h < 48) return h + 'h ago';
+      return Math.floor(h / 24) + 'd ago';
+    }
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"']/g, c => ({
+        '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+      }[c]));
+    }
+  </script>
+</body>
+</html>
