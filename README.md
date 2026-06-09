@@ -33,7 +33,7 @@ doughcon-data/
 ## 수집 파이프라인 (기획서 §3.1)
 
 ```text
-GitHub Actions cron (*/30 * * * *)
+GitHub Actions cron (7,37 * * * *)  ← 30분 간격 + 정시 부하 회피
         │
         ▼
 collector.py
@@ -141,7 +141,7 @@ http://localhost:8000/debug/?csv=https://raw.githubusercontent.com/<user>/<repo>
 
 | 항목          | 값                                                |
 | ------------- | ------------------------------------------------- |
-| 트리거        | `cron: */30 * * * *` + `workflow_dispatch`        |
+| 트리거        | `cron: 7,37 * * * *` + `workflow_dispatch` (정시 부하 회피용 7분 오프셋) |
 | 런타임        | `ubuntu-latest`, `python-3.11`                    |
 | 의존성 캐싱   | `actions/cache@v4` → `~/.cache/pip`               |
 | 권한          | `contents: write` (CSV 자동 커밋)                 |

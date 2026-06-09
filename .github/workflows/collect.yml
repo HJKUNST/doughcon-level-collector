@@ -1,9 +1,14 @@
 name: collect-doughcon
 
-# 기획서 §3.2 / §4.2 — 30분 간격 무료 상시 스케줄러
+# 기획서 §3.2 / §4.2 — 30분 간격 무료 상시 스케줄러.
+# cron 식은 의도적으로 매시 7/37분 (정시 0/30분에서 7분 비뚤어짐) 사용:
+#   - GitHub Actions cron 은 정시 0/30분에 부하가 몰려 스킵/지연이 잦다.
+#     (공식 문서: "high load times include the start of every hour")
+#   - 7분 비뚤어짐만으로도 스킵 빈도가 의미 있게 줄어든다.
+# 월 Actions 분 사용량은 그대로 (30분 간격 유지).
 on:
   schedule:
-    - cron: "*/30 * * * *"
+    - cron: "7,37 * * * *"
   workflow_dispatch: {}
 
 permissions:
