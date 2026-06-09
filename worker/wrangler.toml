@@ -1,0 +1,21 @@
+name = "doughcon-collector"
+main = "src/index.ts"
+compatibility_date = "2026-06-09"
+
+# 분 단위 정확도의 cron. GitHub Actions cron 의 정시 부하/skipping 문제 없음.
+# 7,37 형태로 매시 7/37 분에 동작 (월 1,440 invocations, 무료 한도 100,000/day 의 0.05%).
+[triggers]
+crons = ["7,37 * * * *"]
+
+# 운영 가시성을 위한 observability (Cloudflare 대시보드 Logs 탭).
+[observability]
+enabled = true
+
+# 환경 변수 (비밀 아닌 값만). 비밀(GITHUB_TOKEN) 은 `wrangler secret put` 으로 등록.
+[vars]
+GITHUB_OWNER = "HJKUNST"
+GITHUB_REPO  = "doughcon-level-collector"
+GITHUB_BRANCH = "main"
+CSV_PATH   = "data/doughcon_raw.csv"
+JSONL_DIR  = "data/_raw_json"
+USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"

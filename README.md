@@ -13,20 +13,30 @@ Pentagon Pizza Index(DOUGHCON) 비공식 API 를 30분 간격으로 수집하여
 
 ```text
 doughcon-data/
-├── collector.py              # API 호출 → CSV append (Actions 가 30분마다 실행)
+├── collector.py              # 동일 로직의 Python 구현 (Actions 백업/로컬 점검용)
 ├── merger.py                 # yfinance 와 병합 (수동 1회 실행)
 ├── requirements.txt
 ├── data/
-│   ├── doughcon_raw.csv      # 누적 원시 데이터 (Actions 가 자동 커밋)
+│   ├── doughcon_raw.csv      # 누적 원시 데이터 (Worker 가 자동 커밋)
 │   ├── _raw_json/            # 슬림 원본 응답 백업 (월별 .jsonl, 스키마 변경 보험)
 │   └── merged_final.csv      # 분석용 병합 결과 (수동 생성, .gitignore)
 ├── debug/
 │   └── index.html            # 디버깅용 정적 대시보드
+├── worker/                   # ★ 주력 수집 엔진 (Cloudflare Worker, TypeScript)
+│   ├── src/index.ts          # scheduled handler — 30분마다 fetch + GitHub Contents API commit
+│   ├── wrangler.toml         # cron: 7,37 * * * *
+│   └── README.md             # 셋업/배포/검증 가이드
 └── .github/workflows/
-    ├── collect.yml           # 30분 cron — 수집/커밋
+    ├── collect.yml           # (백업/수동) Actions 도 같은 collector.py 실행
     ├── monitor.yml           # 1시간 cron — last_ts age 검사 (2h+ 시 fail)
     └── keepalive.yml         # 주 1회 — 60일 룰 회피용 PAT push
 ```
+
+> **왜 Cloudflare Worker 가 주력인가**: GitHub Actions cron 은 신규 레포에서
+> "활성화 지연"(수 시간~수십 시간) 과 "정시 부하 스킵" 이라는 본질적 신뢰성
+> 문제가 있어 30분 간격 정확 수집에 부적합. Cloudflare Workers Cron Triggers 는
+> 분 단위 정확도를 제공하며 무료 한도 안에 충분히 들어온다. 자세한 셋업은
+> [`worker/README.md`](worker/README.md) 참조.
 
 ---
 
