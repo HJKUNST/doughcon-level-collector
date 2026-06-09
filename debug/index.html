@@ -216,7 +216,13 @@
       5: 'QUIET',
     };
 
+    // 1순위: 같은 origin 의 상대 경로 (로컬 서버 / GitHub Pages 둘 다 자동 대응).
+    // 2순위(원격 fallback): public 레포의 GitHub raw URL. 로컬 git pull 이 뒤처졌거나
+    //   file:// 로 열었을 때도 늘 최신 데이터를 보여주기 위함.
+    //   사용자 ?csv=... 로 임의 CSV 지정 시엔 fallback 비활성화.
     const DEFAULT_CSV = '../data/doughcon_raw.csv';
+    const REMOTE_FALLBACK_CSV =
+      'https://raw.githubusercontent.com/HJKUNST/doughcon-level-collector/main/data/doughcon_raw.csv';
 
     let tsChart = null;
 
@@ -224,23 +230,29 @@
 
     function init() {
       const params = new URLSearchParams(location.search);
-      const startUrl = params.get('csv') || DEFAULT_CSV;
+      const userUrl = params.get('csv');
+      const startUrl = userUrl || DEFAULT_CSV;
       document.getElementById('csv-url').value = startUrl;
       document.getElementById('reload-btn').addEventListener('click', () => {
         const u = document.getElementById('csv-url').value.trim() || DEFAULT_CSV;
-        loadAndRender(u);
+        loadAndRender(u, { allowFallback: !userUrl });
       });
-      loadAndRender(startUrl);
+      loadAndRender(startUrl, { allowFallback: !userUrl });
     }
 
-    async function loadAndRender(url) {
+    async function loadAndRender(url, { allowFallback = false } = {}) {
       setNotice('');
       setLoadedFrom(`fetching ${url} …`);
       try {
-        const resp = await fetch(url, { cache: 'no-store' });
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-        const text = await resp.text();
-        const rows = parseCsv(text);
+        const rows = await fetchCsvRows(url);
+        if (!rows.length && allowFallback && url !== REMOTE_FALLBACK_CSV) {
+          // 로컬이 비어있으면 원격 fallback 자동 시도.
+          setNotice(`로컬 CSV 가 비어있어 원격 fallback 시도: <code>${escapeHtml(REMOTE_FALLBACK_CSV)}</code>`);
+          const remoteRows = await fetchCsvRows(REMOTE_FALLBACK_CSV);
+          setLoadedFrom(`${REMOTE_FALLBACK_CSV} — ${remoteRows.length} rows (fallback)`);
+          render(remoteRows);
+          return;
+        }
         if (!rows.length) {
           setLoadedFrom(`${url} — empty (collector 가 아직 1회도 실행되지 않았을 수 있음)`);
           render([]);
@@ -249,12 +261,36 @@
         setLoadedFrom(`${url} — ${rows.length} rows`);
         render(rows);
       } catch (e) {
+        // 1차 실패 시 원격 fallback 자동 시도 (사용자 지정 URL 아닐 때만)
+        if (allowFallback && url !== REMOTE_FALLBACK_CSV) {
+          try {
+            setNotice(`로컬 로드 실패 → 원격 fallback 시도: <code>${escapeHtml(REMOTE_FALLBACK_CSV)}</code>`);
+            const remoteRows = await fetchCsvRows(REMOTE_FALLBACK_CSV);
+            setLoadedFrom(`${REMOTE_FALLBACK_CSV} — ${remoteRows.length} rows (fallback)`);
+            render(remoteRows);
+            return;
+          } catch (e2) {
+            const hint = location.protocol === 'file:'
+              ? 'file:// 로 열면 일부 브라우저가 CSV fetch 를 차단할 수 있습니다.'
+              : '경로/네트워크/레포 visibility(public 여부) 를 확인하세요.';
+            setNotice(`<span class="err">로컬+원격 모두 실패:</span> local=${escapeHtml(String(e.message||e))}, remote=${escapeHtml(String(e2.message||e2))}. ${hint}`);
+            setLoadedFrom(`failed: ${url}`);
+            return;
+          }
+        }
         const hint = location.protocol === 'file:'
           ? 'file:// 로 열면 브라우저가 CSV 를 차단합니다. <code>python3 -m http.server -d . 8000</code> 후 <code>http://localhost:8000/debug/</code> 로 여세요.'
           : '경로/네트워크를 확인하세요.';
         setNotice(`<span class="err">CSV 로드 실패:</span> ${escapeHtml(String(e.message || e))}. ${hint}`);
         setLoadedFrom(`failed: ${url}`);
       }
+    }
+
+    async function fetchCsvRows(url) {
+      const resp = await fetch(url, { cache: 'no-store' });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const text = await resp.text();
+      return parseCsv(text);
     }
 
     function parseCsv(text) {

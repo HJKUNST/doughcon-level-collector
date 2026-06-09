@@ -47,11 +47,17 @@ jobs:
 
       - name: Touch heartbeat file & push
         if: steps.guard.outputs.skip == 'false'
+        # secret 을 명령줄 인자에 직접 interpolation 하지 않고 env 로 받아서 ${TOKEN}
+        # 으로 참조. GitHub Actions 의 자동 마스킹과는 별개로, shell command line 에
+        # 토큰 문자열이 그대로 노출되지 않게 하는 보안 best practice.
+        env:
+          TOKEN: ${{ secrets.KEEPALIVE_PAT }}
         run: |
           set -euo pipefail
           # 사람이 만든 PAT 의 user 정보를 GitHub API 로 조회.
           # 사용자 계정의 commit 이어야만 "repository activity" 로 인정된다.
-          USER_JSON=$(curl -fsSL -H "Authorization: Bearer ${{ secrets.KEEPALIVE_PAT }}" \
+          USER_JSON=$(curl -fsSL \
+            -H "Authorization: Bearer ${TOKEN}" \
             -H "Accept: application/vnd.github+json" \
             https://api.github.com/user)
           USER_LOGIN=$(echo "$USER_JSON" | python3 -c "import json,sys; print(json.load(sys.stdin)['login'])")
