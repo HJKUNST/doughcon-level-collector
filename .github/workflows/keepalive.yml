@@ -75,4 +75,15 @@ jobs:
             exit 0
           fi
           git commit -m "chore: keepalive ($(date -u +%Y-%m-%d))"
-          git push origin "HEAD:${GITHUB_REF_NAME:-main}"
+
+          # collect.yml 이 30분마다 main 에 푸시하므로, checkout 이후 push 사이에
+          # race 가 나면 non-fast-forward 로 거부될 수 있다. rebase 후 재시도.
+          for i in 1 2 3; do
+            if git push origin "HEAD:${GITHUB_REF_NAME:-main}"; then
+              exit 0
+            fi
+            git fetch origin "${GITHUB_REF_NAME:-main}"
+            git rebase "origin/${GITHUB_REF_NAME:-main}"
+          done
+          echo "::error::push failed after retries"
+          exit 1
