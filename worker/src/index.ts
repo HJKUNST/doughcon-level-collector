@@ -53,7 +53,7 @@ export default {
   },
   // 디버깅용: 브라우저로 직접 호출하면 1회 수집 후 결과를 텍스트로 반환.
   // (배포 URL/__run 으로만 트리거. 인증 없음 → 공격 표면 작음. 실행만 가능)
-  async fetch(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  async fetch(req: Request, env: Env, _ctx: ExecutionContext): Promise<Response> {
     const url = new URL(req.url);
     if (url.pathname === "/__run") {
       const result = await runOnce(env, "manual");
@@ -80,6 +80,14 @@ type RunResult = {
 };
 
 async function runOnce(env: Env, trigger: string): Promise<RunResult> {
+  if (!env.GITHUB_TOKEN?.trim()) {
+    const err =
+      "GITHUB_TOKEN secret is missing. Run: npx wrangler secret put GITHUB_TOKEN " +
+      "(name must be exactly GITHUB_TOKEN, then paste PAT as the value when prompted)";
+    console.error(`[collector][ERROR] ${err}`);
+    return { ok: false, trigger, fetchedAt: isoUtcSeconds(new Date()), error: err };
+  }
+
   const fetchedAt = new Date();
   const fetchedAtIso = isoUtcSeconds(fetchedAt);
   console.log(`[collector][${trigger}] fetch start at ${fetchedAt.toISOString()}`);
