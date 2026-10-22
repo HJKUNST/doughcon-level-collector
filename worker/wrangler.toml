@@ -11,7 +11,7 @@ crons = ["7,37 * * * *", "10 15 * * *"]
 # 하루치 수집분 버퍼. id 는 `npx wrangler kv namespace create BUFFER` 출력값으로 교체.
 [[kv_namespaces]]
 binding = "BUFFER"
-id = "REPLACE_WITH_KV_NAMESPACE_ID"
+id = "704371781bb94deda23a9a620e476972"
 
 # 운영 가시성을 위한 observability (Cloudflare 대시보드 Logs 탭).
 [observability]
