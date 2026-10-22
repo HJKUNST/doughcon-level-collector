@@ -23,12 +23,12 @@ doughcon-data/
 ├── debug/
 │   └── index.html            # 디버깅용 정적 대시보드
 ├── worker/                   # ★ 주력 수집 엔진 (Cloudflare Worker, TypeScript)
-│   ├── src/index.ts          # scheduled handler — 30분마다 fetch + GitHub Contents API commit
-│   ├── wrangler.toml         # cron: 7,37 * * * *
+│   ├── src/index.ts          # 30분마다 fetch → KV, 하루 1번 Git Data API 로 1커밋
+│   ├── wrangler.toml         # cron: 7,37 * * * * (수집) + 10 15 * * * (flush)
 │   └── README.md             # 셋업/배포/검증 가이드
 └── .github/workflows/
     ├── collect.yml           # (백업/수동) Actions 도 같은 collector.py 실행
-    ├── monitor.yml           # 1시간 cron — last_ts age 검사 (2h+ 시 fail)
+    ├── monitor.yml           # 1시간 cron — last_ts age 검사 (26h+ 시 fail)
     └── keepalive.yml         # 주 1회 — 60일 룰 회피용 PAT push
 ```
 

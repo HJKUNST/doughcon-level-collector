@@ -4,7 +4,8 @@ name: monitor-doughcon
 # 실패시킨다. 실패 워크플로우는 GitHub 가 기본 이메일로 알림 → 외부 서비스 없이
 # 수집 중단을 인지할 수 있다.
 #
-# 임계치: 2시간. cron 정시 지연(15분 내외)을 감안해도 충분히 보수적.
+# 임계치: 26시간. Worker 가 하루 1번(KST 00:10) 몰아서 push 하므로 정상이어도
+# 마지막 행이 최대 ~24.5시간 묵는다.
 
 on:
   schedule:
@@ -25,7 +26,7 @@ jobs:
 
       - name: Check last collected timestamp age
         env:
-          MAX_AGE_MINUTES: "120"  # 2 hours
+          MAX_AGE_MINUTES: "1560"  # 26 hours
         run: |
           set -euo pipefail
           python3 <<'PY'
