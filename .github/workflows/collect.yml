@@ -5,9 +5,9 @@ name: collect-doughcon
 #   - GitHub Actions cron 은 정시 0/30분에 부하가 몰려 스킵/지연이 잦다.
 #     (공식 문서: "high load times include the start of every hour")
 # 월 Actions 분 사용량: 720분 (무료 한도 2000의 36%).
+# schedule 은 껐다: Cloudflare Worker 가 하루 1커밋으로 수집한다. 이 워크플로우는
+# Worker 장애 시 수동(workflow_dispatch) 백업용으로만 남긴다.
 on:
-  schedule:
-    - cron: "7,37 * * * *"
   workflow_dispatch: {}
 
 permissions:

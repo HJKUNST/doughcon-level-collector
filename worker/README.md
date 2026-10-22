@@ -72,6 +72,16 @@ npx wrangler secret list
 # → [{"name":"GITHUB_TOKEN","type":"secret_text"}]
 ```
 
+### 4-1. KV 버퍼 생성
+
+수집분은 KV 에 모았다가 하루 1번(KST 00:10) 1커밋으로 push 한다.
+
+```bash
+npx wrangler kv namespace create BUFFER
+```
+
+출력된 `id` 를 `wrangler.toml` 의 `[[kv_namespaces]]` → `id` 에 넣는다.
+
 ### 5. 배포
 
 ```bash
@@ -82,14 +92,16 @@ npx wrangler deploy
 
 ### 6. 동작 검증
 
-배포 URL 뒤에 `/__run`을 붙여 열면 1회 수동 실행 후 결과가 JSON으로 반환된다.
+배포 URL 뒤에 `/__run`을 붙여 열면 1회 수집해 KV 에 저장하고, `/__flush`를
+열면 KV 에 쌓인 행을 즉시 1커밋으로 push 한다.
 
 ```
 https://doughcon-collector.<subdomain>.workers.dev/__run
+https://doughcon-collector.<subdomain>.workers.dev/__flush
 ```
 
-`{"ok":true,"csv":{"appended":true,"sha":"..."}, ...}`가 반환되면 성공이며,
-레포에 `chore(data): collect doughcon @ ... [worker]` commit이 생성된다.
+`/__run` 이 `{"ok":true,"buffered":"row:..."}`, `/__flush` 가 `{"ok":true,"rows":N,...}`
+를 반환하면 성공이며, 레포에 `chore(data): daily collect ... [worker]` commit이 생성된다.
 `{"ok":false,"error":"GITHUB_TOKEN secret is missing..."}`가 반환되면 4단계를
 다시 확인한다.
 
@@ -135,10 +147,9 @@ npx wrangler deploy                          # 재활성화
 
 | 트리거 | 역할 |
 |---|---|
-| Worker cron | 주력 — 30분 주기 자동 수집 |
-| Actions `schedule` | 백업 |
-| Actions `workflow_dispatch` | 수동 점검용 |
-| `monitor.yml` | 2시간 무갱신 시 stall 알림 |
+| Worker cron | 주력 — 30분 주기 수집, 하루 1커밋 push |
+| Actions `workflow_dispatch` | 수동 백업용 (schedule 은 제거됨) |
+| `monitor.yml` | 26시간 무갱신 시 stall 알림 |
 
 동일 timestamp의 중복 commit을 막기 위해 sha 기반 동시성 재시도와 중복
 timestamp 가드를 양쪽에 동일하게 적용했다. Worker가 1~2일 안정적으로 동작함이
